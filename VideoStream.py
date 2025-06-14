@@ -20,6 +20,7 @@
 # Import the necessary packages
 from threading import Thread
 import cv2
+import platform
 
 
 class VideoStream:
@@ -29,29 +30,44 @@ class VideoStream:
         # Create a variable to indicate if it's a USB camera or PiCamera.
         # PiOrUSB = 1 will use PiCamera. PiOrUSB = 2 will use USB camera.
         self.PiOrUSB = PiOrUSB
+        
+        # Force USB camera on macOS
+        if platform.system() == 'Darwin':  # Darwin is the kernel name for macOS
+            self.PiOrUSB = 2
+            print("Detected macOS - using USB camera mode")
 
         if self.PiOrUSB == 1: # PiCamera
-            # Import packages from picamera library
-            from picamera.array import PiRGBArray
-            from picamera import PiCamera
+            try:
+                # Import packages from picamera library
+                from picamera.array import PiRGBArray
+                from picamera import PiCamera
 
-            # Initialize the PiCamera and the camera image stream
-            self.camera = PiCamera()
-            self.camera.resolution = resolution
-            self.camera.framerate = framerate
-            self.rawCapture = PiRGBArray(self.camera,size=resolution)
-            self.stream = self.camera.capture_continuous(
-                self.rawCapture, format = "bgr", use_video_port = True)
+                # Initialize the PiCamera and the camera image stream
+                self.camera = PiCamera()
+                self.camera.resolution = resolution
+                self.camera.framerate = framerate
+                self.rawCapture = PiRGBArray(self.camera,size=resolution)
+                self.stream = self.camera.capture_continuous(
+                    self.rawCapture, format = "bgr", use_video_port = True)
 
-            # Initialize variable to store the camera frame
-            self.frame = []
+                # Initialize variable to store the camera frame
+                self.frame = []
+            except ImportError:
+                print("PiCamera not available. Switching to USB camera.")
+                self.PiOrUSB = 2
 
         if self.PiOrUSB == 2: # USB camera
             # Initialize the USB camera and the camera image stream
             self.stream = cv2.VideoCapture(src)
-            ret = self.stream.set(3,resolution[0])
-            ret = self.stream.set(4,resolution[1])
-            #ret = self.stream.set(5,framerate) #Doesn't seem to do anything so it's commented out
+            
+            # Set camera properties
+            self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+            self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+            self.stream.set(cv2.CAP_PROP_FPS, framerate)
+            
+            # For macOS, we might need to set the backend
+            if platform.system() == 'Darwin':
+                self.stream.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
 
             # Read first frame from the stream
             (self.grabbed, self.frame) = self.stream.read()

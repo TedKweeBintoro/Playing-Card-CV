@@ -8,6 +8,7 @@ import numpy as np
 import time
 import Cards
 import os
+import platform
 
 img_path = os.path.dirname(os.path.abspath(__file__)) + '/Card_Imgs/'
 
@@ -21,22 +22,29 @@ SUIT_WIDTH = 70
 SUIT_HEIGHT = 100
 
 # If using a USB Camera instead of a PiCamera, change PiOrUSB to 2
-PiOrUSB = 1
+# Automatically use USB camera on Mac
+PiOrUSB = 2 if platform.system() == 'Darwin' else 1
 
 if PiOrUSB == 1:
-    # Import packages from picamera library
-    from picamera.array import PiRGBArray
-    from picamera import PiCamera
+    try:
+        # Import packages from picamera library
+        from picamera.array import PiRGBArray
+        from picamera import PiCamera
 
-    # Initialize PiCamera and grab reference to the raw capture
-    camera = PiCamera()
-    camera.resolution = (IM_WIDTH,IM_HEIGHT)
-    camera.framerate = 10
-    rawCapture = PiRGBArray(camera, size=(IM_WIDTH,IM_HEIGHT))
+        # Initialize PiCamera and grab reference to the raw capture
+        camera = PiCamera()
+        camera.resolution = (IM_WIDTH,IM_HEIGHT)
+        camera.framerate = 10
+        rawCapture = PiRGBArray(camera, size=(IM_WIDTH,IM_HEIGHT))
+    except ImportError:
+        print("PiCamera not available. Switching to USB camera.")
+        PiOrUSB = 2
 
 if PiOrUSB == 2:
     # Initialize USB camera
     cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, IM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, IM_HEIGHT)
 
 # Use counter variable to switch from isolating Rank to isolating Suit
 i = 1
@@ -81,7 +89,7 @@ for Name in ['Ace','Two','Three','Four','Five','Six','Seven','Eight',
     retval, thresh = cv2.threshold(blur,100,255,cv2.THRESH_BINARY)
 
     # Find contours and sort them by size
-    dummy,cnts,hier = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+    cnts, hier = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)[-2:]
     cnts = sorted(cnts, key=cv2.contourArea,reverse=True)
 
     # Assume largest contour is the card. If there are no contours, print an error
@@ -114,7 +122,7 @@ for Name in ['Ace','Two','Three','Four','Five','Six','Seven','Eight',
     # Isolate suit or rank
     if i <= 13: # Isolate rank
         rank = corner_thresh[20:185, 0:128] # Grabs portion of image that shows rank
-        dummy, rank_cnts, hier = cv2.findContours(rank, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        rank_cnts, hier = cv2.findContours(rank, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)[-2:]
         rank_cnts = sorted(rank_cnts, key=cv2.contourArea,reverse=True)
         x,y,w,h = cv2.boundingRect(rank_cnts[0])
         rank_roi = rank[y:y+h, x:x+w]
@@ -123,7 +131,7 @@ for Name in ['Ace','Two','Three','Four','Five','Six','Seven','Eight',
 
     if i > 13: # Isolate suit
         suit = corner_thresh[186:336, 0:128] # Grabs portion of image that shows suit
-        dummy, suit_cnts, hier = cv2.findContours(suit, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        suit_cnts, hier = cv2.findContours(suit, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)[-2:]
         suit_cnts = sorted(suit_cnts, key=cv2.contourArea,reverse=True)
         x,y,w,h = cv2.boundingRect(suit_cnts[0])
         suit_roi = suit[y:y+h, x:x+w]
@@ -141,4 +149,7 @@ for Name in ['Ace','Two','Three','Four','Five','Six','Seven','Eight',
     i = i + 1
 
 cv2.destroyAllWindows()
-camera.close()
+if PiOrUSB == 1:
+    camera.close()
+else:
+    cap.release()

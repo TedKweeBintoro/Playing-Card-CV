@@ -13,6 +13,7 @@ import time
 import os
 import Cards
 import VideoStream
+import platform
 
 
 ### ---- INITIALIZATION ---- ###
@@ -35,7 +36,9 @@ font = cv2.FONT_HERSHEY_SIMPLEX
 # See VideoStream.py for VideoStream class definition
 ## IF USING USB CAMERA INSTEAD OF PICAMERA,
 ## CHANGE THE THIRD ARGUMENT FROM 1 TO 2 IN THE FOLLOWING LINE:
-videostream = VideoStream.VideoStream((IM_WIDTH,IM_HEIGHT),FRAME_RATE,1,0).start()
+# Automatically use USB camera on Mac
+camera_mode = 2 if platform.system() == 'Darwin' else 1
+videostream = VideoStream.VideoStream((IM_WIDTH,IM_HEIGHT),FRAME_RATE,camera_mode,0).start()
 time.sleep(1) # Give the camera time to warm up
 
 # Load the train rank and suit images
