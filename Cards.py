@@ -35,6 +35,10 @@ SUIT_DIFF_MAX = 700
 CARD_MAX_AREA = 120000
 CARD_MIN_AREA = 25000
 
+STACKED_CARD_MAX_AREA = 200000  # Larger area for stacked cards
+MIN_CORNER_DISTANCE = 20  # Minimum distance between corners
+STACK_OFFSET_THRESHOLD = 15  # Minimum offset to consider cards stacked
+
 font = cv2.FONT_HERSHEY_SIMPLEX
 
 ### Structures to hold query card and train card information ###
@@ -68,6 +72,15 @@ class Train_suits:
     def __init__(self):
         self.img = [] # Thresholded, sized suit image loaded from hard drive
         self.name = "Placeholder"
+
+class Stacked_Query_card:
+    """Structure to store information about potentially stacked cards."""
+    
+    def __init__(self):
+        self.cards = []  # List of individual Query_card objects
+        self.is_stacked = False
+        self.num_cards = 0
+        self.combined_contour = []
 
 ### Functions ###
 def load_ranks(filepath):
@@ -167,6 +180,174 @@ def find_cards(thresh_image):
             cnt_is_card[i] = 1
 
     return cnts_sort, cnt_is_card
+
+def find_stacked_cards(thresh_image):
+    """Enhanced version of find_cards that can detect stacked cards."""
+    
+    # Find contours and sort their indices by contour size
+    cnts, hier = cv2.findContours(thresh_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[-2:]
+    index_sort = sorted(range(len(cnts)), key=lambda i: cv2.contourArea(cnts[i]), reverse=True)
+
+    if len(cnts) == 0:
+        return [], []
+    
+    cnts_sort = []
+    hier_sort = []
+    cnt_is_card = np.zeros(len(cnts), dtype=int)
+    cnt_is_stacked = np.zeros(len(cnts), dtype=int)
+
+    for i in index_sort:
+        cnts_sort.append(cnts[i])
+        hier_sort.append(hier[0][i])
+
+    for i in range(len(cnts_sort)):
+        size = cv2.contourArea(cnts_sort[i])
+        peri = cv2.arcLength(cnts_sort[i], True)
+        approx = cv2.approxPolyDP(cnts_sort[i], 0.01*peri, True)
+        
+        # Standard single card detection
+        if ((size < CARD_MAX_AREA) and (size > CARD_MIN_AREA) 
+            and (hier_sort[i][3] == -1) and (len(approx) == 4)):
+            cnt_is_card[i] = 1
+            
+        # Enhanced detection for stacked cards
+        elif ((size < STACKED_CARD_MAX_AREA) and (size > CARD_MIN_AREA) 
+              and (hier_sort[i][3] == -1) and (len(approx) >= 6) and (len(approx) <= 8)):
+            
+            # Check if this could be two stacked cards
+            if is_likely_stacked_cards(cnts_sort[i], approx):
+                cnt_is_stacked[i] = 1
+                cnt_is_card[i] = 1  # Also mark as card for processing
+
+    return cnts_sort, cnt_is_card, cnt_is_stacked
+
+def is_likely_stacked_cards(contour, approx_corners):
+    """Determine if a contour represents two stacked cards."""
+    
+    if len(approx_corners) < 6:
+        return False
+    
+    # Convert to regular array for easier processing
+    corners = np.array([point[0] for point in approx_corners])
+    
+    # Check if we can identify two sets of 4 corners that form rectangles
+    return analyze_corner_patterns(corners)
+
+def analyze_corner_patterns(corners):
+    """Analyze corner points to see if they form two overlapping rectangles."""
+    
+    # Simple heuristic: check if corners can be grouped into two rectangular patterns
+    # This is a simplified version - you might want to use more sophisticated clustering
+    
+    if len(corners) < 6:
+        return False
+    
+    # Calculate pairwise distances to find potential card boundaries
+    distances = []
+    for i in range(len(corners)):
+        for j in range(i+1, len(corners)):
+            dist = np.linalg.norm(corners[i] - corners[j])
+            distances.append((dist, i, j))
+    
+    # Look for patterns that suggest two overlapping rectangles
+    # This is a heuristic - in practice, you might use more sophisticated methods
+    return len(corners) >= 6 and len(corners) <= 8
+
+def separate_stacked_cards(contour, image):
+    """Separate a stacked card contour into individual cards."""
+    
+    # Get the approximated corners
+    peri = cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, 0.01*peri, True)
+    corners = np.array([point[0] for point in approx])
+    
+    if len(corners) < 6:
+        # Fallback to single card processing
+        return [preprocess_card(contour, image)]
+    
+    # Attempt to separate into two sets of corners
+    card_corners = separate_corner_sets(corners)
+    
+    cards = []
+    for corner_set in card_corners:
+        if len(corner_set) == 4:
+            # Create a synthetic contour from the 4 corners
+            synthetic_contour = np.array([[[int(x), int(y)]] for x, y in corner_set])
+            card = preprocess_card(synthetic_contour, image)
+            cards.append(card)
+    
+    return cards
+
+def separate_corner_sets(corners):
+    """Separate corner points into two sets of 4 corners each."""
+    
+    # This is a simplified approach using geometric analysis
+    # In practice, you might want to use clustering algorithms like K-means
+    
+    if len(corners) == 6:
+        return separate_6_corners(corners)
+    elif len(corners) == 7:
+        return separate_7_corners(corners)
+    elif len(corners) == 8:
+        return separate_8_corners(corners)
+    else:
+        return [corners[:4]]  # Fallback
+
+def separate_6_corners(corners):
+    """Handle case where we have 6 corners (2 corners are shared/merged)."""
+    
+    # Find the center point
+    center = np.mean(corners, axis=0)
+    
+    # Sort corners by angle from center
+    angles = np.arctan2(corners[:, 1] - center[1], corners[:, 0] - center[0])
+    sorted_indices = np.argsort(angles)
+    sorted_corners = corners[sorted_indices]
+    
+    # Heuristic: split into two overlapping sets
+    # This is simplified - you might need more sophisticated logic
+    set1 = sorted_corners[[0, 1, 2, 5]]  # First card
+    set2 = sorted_corners[[1, 2, 3, 4]]  # Second card (overlapping)
+    
+    return [set1, set2]
+
+def separate_7_corners(corners):
+    """Handle case where we have 7 corners."""
+    
+    # Similar approach but need to identify which corner belongs to which card
+    center = np.mean(corners, axis=0)
+    angles = np.arctan2(corners[:, 1] - center[1], corners[:, 0] - center[0])
+    sorted_indices = np.argsort(angles)
+    sorted_corners = corners[sorted_indices]
+    
+    # Heuristic split
+    set1 = sorted_corners[[0, 1, 2, 6]]
+    set2 = sorted_corners[[2, 3, 4, 5]]
+    
+    return [set1, set2]
+
+def separate_8_corners(corners):
+    """Handle case where we have 8 distinct corners."""
+    
+    # This is the ideal case - try to group into two sets of 4
+    center = np.mean(corners, axis=0)
+    angles = np.arctan2(corners[:, 1] - center[1], corners[:, 0] - center[0])
+    sorted_indices = np.argsort(angles)
+    sorted_corners = corners[sorted_indices]
+    
+    # Split into two sets of 4
+    set1 = sorted_corners[:4]
+    set2 = sorted_corners[4:]
+    
+    return [set1, set2]
+
+def enhanced_preprocess_card(contour, image, is_stacked=False):
+    """Enhanced preprocessing that can handle stacked cards."""
+    
+    if not is_stacked:
+        return [preprocess_card(contour, image)]
+    else:
+        return separate_stacked_cards(contour, image)
 
 def preprocess_card(contour, image):
     """Uses contour to find information about the query card. Isolates rank

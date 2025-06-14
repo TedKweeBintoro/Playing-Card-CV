@@ -66,41 +66,44 @@ while cam_quit == 0:
     pre_proc = Cards.preprocess_image(image)
 	
     # Find and sort the contours of all cards in the image (query cards)
-    cnts_sort, cnt_is_card = Cards.find_cards(pre_proc)
+    cnts_sort, cnt_is_card, cnt_is_stacked = Cards.find_stacked_cards(pre_proc)
 
     # If there are no contours, do nothing
     if len(cnts_sort) != 0:
-
-        # Initialize a new "cards" list to assign the card objects.
-        # k indexes the newly made array of cards.
         cards = []
         k = 0
 
         # For each contour detected:
         for i in range(len(cnts_sort)):
             if (cnt_is_card[i] == 1):
+                
+                # Check if this is a stacked card
+                if cnt_is_stacked[i] == 1:
+                    # Process as stacked cards
+                    separated_cards = Cards.enhanced_preprocess_card(cnts_sort[i], image, is_stacked=True)
+                    
+                    for card in separated_cards:
+                        # Find the best rank and suit match for each card
+                        card.best_rank_match, card.best_suit_match, card.rank_diff, card.suit_diff = Cards.match_card(card, train_ranks, train_suits)
+                        cards.append(card)
+                        k += 1
+                else:
+                    # Process as single card (original logic)
+                    card = Cards.preprocess_card(cnts_sort[i], image)
+                    card.best_rank_match, card.best_suit_match, card.rank_diff, card.suit_diff = Cards.match_card(card, train_ranks, train_suits)
+                    cards.append(card)
+                    k += 1
 
-                # Create a card object from the contour and append it to the list of cards.
-                # preprocess_card function takes the card contour and contour and
-                # determines the cards properties (corner points, etc). It generates a
-                # flattened 200x300 image of the card, and isolates the card's
-                # suit and rank from the image.
-                cards.append(Cards.preprocess_card(cnts_sort[i],image))
-
-                # Find the best rank and suit match for the card.
-                cards[k].best_rank_match,cards[k].best_suit_match,cards[k].rank_diff,cards[k].suit_diff = Cards.match_card(cards[k],train_ranks,train_suits)
-
-                # Draw center point and match result on the image.
-                image = Cards.draw_results(image, cards[k])
-                k = k + 1
-	    
-        # Draw card contours on image (have to do contours all at once or
-        # they do not show up properly for some reason)
-        if (len(cards) != 0):
+        # Draw results for all detected cards
+        for card in cards:
+            image = Cards.draw_results(image, card)
+        
+        # Draw contours
+        if len(cards) != 0:
             temp_cnts = []
-            for i in range(len(cards)):
-                temp_cnts.append(cards[i].contour)
-            cv2.drawContours(image,temp_cnts, -1, (255,0,0), 2)
+            for card in cards:
+                temp_cnts.append(card.contour)
+            cv2.drawContours(image, temp_cnts, -1, (255, 0, 0), 2)
         
         
     # Draw framerate in the corner of the image. Framerate is calculated at the end of the main loop,
